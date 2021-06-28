@@ -1,3 +1,16 @@
+
+# Ignore Mac system files
+.DS_store
+
+# Ignore all R cache
+*.Rhistory
+
+# Ignore cached model weights
+# *.pkl
+
+# Ignore temp Latex files / images
+*.ps
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
