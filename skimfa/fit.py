@@ -41,7 +41,7 @@ class SKIMFA(object):
 	def __init__(self, gpu=False):
 		assert gpu == False, 'Not Implemented GPU support yet'
 
-	def fit(self, train_valid_data, skimfa_kernel_fn, kernel_config, optimization_config):
+	def fit(self, train_valid_data, skimfa_kernel, kernel_config, optimization_config):
 		self.kernel_config = kernel_config
 		self.optimization_config = optimization_config
 
@@ -58,7 +58,7 @@ class SKIMFA(object):
 		Q = kernel_config['Q'] # Highest order interaction
 		eta = torch.ones(Q, requires_grad=True) # Intialize global interaction variances to 1
 		U_tilde = torch.ones(p, requires_grad=True) # Unconstrained parameter to generate kappa
-		noise_var = torch.tensor(, requires_grad=)
+		noise_var = torch.tensor(, requires_grad=???)
 		c = 0.
 
 		# Load in optimization specs
@@ -69,6 +69,8 @@ class SKIMFA(object):
 		valid_report_freq = optimization_config['valid_report_freq']
 		lr = optimization_config['lr']
 
+		skimfa_kernel_fn = skimfa_kernel(kernel_config=kernel_config)
+
 		# Gradient descent training loop
 		training_losses = []
 		validation_losses = []
@@ -77,8 +79,8 @@ class SKIMFA(object):
 			X_cv_train, X_cv_test, Y_cv_train, Y_cv_test = train_test_split(X_train, Y_train, test_size=M)
 			kappa = make_kappa(U_tilde, c)
 			c = truncScheduler(t, U_tilde, c)
-			K_train = skimfa_kernel_fn(X1=X_cv_train, X2=X_cv_train, kappa=kappa, eta=eta, kernel_config=kernel_config)
-			K_test_train = skimfa_kernel_fn(X1=X_cv_test, X2=X_cv_train, kappa=kappa, eta=eta, kernel_config=kernel_config)
+			K_train = skimfa_kernel_fn(X1=X_cv_train, X2=X_cv_train, kappa=kappa, eta=eta)
+			K_test_train = skimfa_kernel_fn(X1=X_cv_test, X2=X_cv_train, kappa=kappa, eta=eta)
 			alpha = kernel_ridge_weights(K_train, Y_cv_train, noise_var)
 			L = cv_mse_loss(alpha, K_test_train, Y_cv_test)
 
@@ -94,7 +96,7 @@ class SKIMFA(object):
 			TRAIN NOISE???
 
 			if t % valid_report_freq == 0:
-				K_valid_train = skimfa_kernel_fn(X1=X_valid, X2=X_cv_train, kappa=kappa, eta=eta, kernel_config=kernel_config)
+				K_valid_train = skimfa_kernel_fn(X1=X_valid, X2=X_cv_train, kappa=kappa, eta=eta)
 				valid_mse = cv_mse_loss(alpha, K_valid_train, Y_valid)
 				validation_losses.append(valid_mse)
 
@@ -107,5 +109,16 @@ class SKIMFA(object):
 
 		end_time = time.time()
 		self.fitting_time_minutes = (end_time - start_time) / 60.
+
+
+	def predict(self, X_test):
+
+
+	def get_prod_measure_effect():
+
+
+	def get_covariate_measure_effect():
+
+
 
 
