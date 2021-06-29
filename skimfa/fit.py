@@ -41,7 +41,7 @@ class SKIMFA(object):
 	def __init__(self, gpu=False):
 		assert gpu == False, 'Not Implemented GPU support yet'
 
-	def fit(self, train_valid_data, skimfa_kernel, kernel_config, optimization_config):
+	def fit(self, train_valid_data, kernel_config, optimization_config):
 		self.kernel_config = kernel_config
 		self.optimization_config = optimization_config
 
@@ -53,71 +53,109 @@ class SKIMFA(object):
 		X_valid = train_valid_data['X_valid']
 		Y_valid = train_valid_data['Y_valid']
 
-		# Initialize skimfa kernel hyperparams
-		p = X_train.shape[1] # Total number of covariates
-		Q = kernel_config['Q'] # Highest order interaction
-		eta = torch.ones(Q, requires_grad=True) # Intialize global interaction variances to 1
-		U_tilde = torch.ones(p, requires_grad=True) # Unconstrained parameter to generate kappa
-		noise_var = torch.tensor(, requires_grad=???)
-		c = 0.
-
 		# Load in optimization specs
-		T = optimization_config['T'] # Number of gradient descent steps
 		M = optimization_config['M'] # Number of datapoints for CV loss
 		truncScheduler = optimization_config['truncScheduler']
 		param_save_freq = optimization_config['param_save_freq']
 		valid_report_freq = optimization_config['valid_report_freq']
 		lr = optimization_config['lr']
+		train_noise = optimization_config['train_noise']
+		noise_var_init = optimization_config['noise_var_init']
 
-		skimfa_kernel_fn = skimfa_kernel(kernel_config=kernel_config)
+		# Initialize skimfa kernel hyperparams
+		p = X_train.shape[1] # Total number of covariates
+		Q = kernel_config['Q'] # Highest order interaction
+		eta = torch.ones(Q, requires_grad=True) # Intialize global interaction variances to 1
+		U_tilde = torch.ones(p, requires_grad=True) # Unconstrained parameter to generate kappa
+		noise_var = torch.tensor(noise_var_init, requires_grad=train_noise)
+		c = 0.
 
-		# Gradient descent training loop
-		training_losses = []
-		validation_losses = []
+		if refit_after_selection:
+			train_modes = ['selection', 'refit']
+
+		else:
+			train_modes = ['selection']
+
+		all_training_losses = dict()
+		all_validation_losses = dict()
 		saved_params = dict()
-		for t in T:
-			X_cv_train, X_cv_test, Y_cv_train, Y_cv_test = train_test_split(X_train, Y_train, test_size=M)
-			kappa = make_kappa(U_tilde, c)
-			c = truncScheduler(t, U_tilde, c)
-			K_train = skimfa_kernel_fn(X1=X_cv_train, X2=X_cv_train, kappa=kappa, eta=eta)
-			K_test_train = skimfa_kernel_fn(X1=X_cv_test, X2=X_cv_train, kappa=kappa, eta=eta)
-			alpha = kernel_ridge_weights(K_train, Y_cv_train, noise_var)
-			L = cv_mse_loss(alpha, K_test_train, Y_cv_test)
+		
+		for train_mode in train_modes:
+			
+			all_training_losses[train_mode] = []
+			all_validation_losses[train_mode] = []
+			saved_params[train_mode] = []
 
-			# Perform gradient decent step
-			L.backward()
-			kappa_unconstrained.data = kappa_unconstrained.data - lr * kappa_unconstrained.grad.data
-			kappa_unconstrained.grad.zero_()
+			if train_mode == 'selection':
+				T_gradient_steps = optimization_config['T']
+				skimfa_kernel = kernel_config['skimfa_kernel']
+				skimfa_kernel_fn = skimfa_kernel(kernel_config=kernel_config)
+				truncScheduler = optimization_config['truncScheduler']
 
-			if eta.requires_grad:
-				eta.data = eta.data - lr * eta.grad.data
-				eta.grad.zero_()
+			else:
+				# Refit eta and kappa after variable selection
+				refit_after_selection = optimization_config['refit_after_selection']
+				if refit_after_selection:
+					saved_params['refit'] = dict()
+					T_gradient_steps = optimization_config['T_refit']
+					skimfa_kernel_refit = optimization_config['skimfa_kernel_refit']
+					skimfa_kernel_fn_refit = skimfa_kernel_refit(kernel_config=kernel_config)
+					truncScheduler = lambda t, U_tilde, c: 0
 
-			TRAIN NOISE???
+			# Gradient descent training loop
+			for t in range(T_gradient_steps):
+				X_cv_train, X_cv_test, Y_cv_train, Y_cv_test = train_test_split(X_train, Y_train, test_size=M)
+				kappa = make_kappa(U_tilde, c)
+				c = truncScheduler(t, U_tilde, c)
+				K_train = skimfa_kernel_fn(X1=X_cv_train, X2=X_cv_train, kappa=kappa, eta=eta)
+				K_test_train = skimfa_kernel_fn(X1=X_cv_test, X2=X_cv_train, kappa=kappa, eta=eta)
+				alpha = kernel_ridge_weights(K_train, Y_cv_train, noise_var)
+				L = cv_mse_loss(alpha, K_test_train, Y_cv_test)
 
-			if t % valid_report_freq == 0:
-				K_valid_train = skimfa_kernel_fn(X1=X_valid, X2=X_cv_train, kappa=kappa, eta=eta)
-				valid_mse = cv_mse_loss(alpha, K_valid_train, Y_valid)
-				validation_losses.append(valid_mse)
+				# Perform gradient decent step
+				L.backward()
+				kappa_unconstrained.data = kappa_unconstrained.data - lr * kappa_unconstrained.grad.data
+				kappa_unconstrained.grad.zero_()
 
-			if t % param_save_freq == 0:
-				saved_params[t] = dict()
-				saved_params['U_tilde'] = U_tilde
-				saved_params['eta'] = eta
-				saved_params['noise_var'] = noise_var
-				saved_params['c'] = c
+				if eta.requires_grad:
+					eta.data = eta.data - lr * eta.grad.data
+					eta.grad.zero_()
 
-		end_time = time.time()
-		self.fitting_time_minutes = (end_time - start_time) / 60.
+				if train_noise:
+					noise_var.data = noise_var.data - lr * noise_var.grad.data
+					noise_var.grad.zero_()
+
+				if (t % valid_report_freq == 0) or t == (T_gradient_steps-1):
+					K_valid_train = skimfa_kernel_fn(X1=X_valid, X2=X_cv_train, kappa=kappa, eta=eta)
+					valid_mse = cv_mse_loss(alpha, K_valid_train, Y_valid)
+					validation_losses.append(valid_mse)
+
+				if (t % param_save_freq == 0) or t == (T_gradient_steps-1):
+					saved_params[t] = dict()
+					saved_params['U_tilde'] = U_tilde
+					saved_params['eta'] = eta
+					saved_params['noise_var'] = noise_var
+					saved_params['c'] = c
+
+			end_time = time.time()
+			self.fitting_time_minutes = (end_time - start_time) / 60.
 
 
 	def predict(self, X_test):
+		pass
 
 
 	def get_prod_measure_effect():
+		pass
 
 
 	def get_covariate_measure_effect():
+		pass
+
+
+class reFitSKIMFA(SKIMFA):
+	pass
+
 
 
 
