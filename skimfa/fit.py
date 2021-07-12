@@ -211,6 +211,30 @@ class reFitSKIMFACV(reFitSKIMFA):
 	pass
 
 
+def get_linear_iteraction_effect(skimfamodel, V):
+	p = skimfamodel.last_iter_params['X_train'].shape[1]
+	if len(V) == 0:
+		raise NotImplementedError
+
+	elif len(V) == 1:
+		cov_ix = V[0]
+		X_test = torch.zeros((2, p))
+		X_test[1, cov_ix] = 1 
+		est_effect = skimfamodel.get_prod_measure_effect(X_test, V)
+		return (est_effect[1] - est_effect[0]).item()
+
+	elif len(V) == 2:
+		cov_ix1, cov_ix2 = V
+		X_test = torch.zeros((2, p))
+		X_test[:, cov_ix1] = 1
+		X_test[1, cov_ix2] = 1
+		est_effect = skimfamodel.get_prod_measure_effect(X_test, V)
+		return (est_effect[1] - est_effect[0]).item()
+
+	else:
+		raise NotImplementedError
+
+
 if __name__ == "__main__":
 	from kernels import *
 	from feature_maps import *
