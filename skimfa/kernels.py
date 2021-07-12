@@ -56,6 +56,9 @@ class SKIMFAKernel(object):
 	def kernel_matrix(self, X1, X2, kappa, eta, X1_info=None, X2_info=None):
 		raise NotImplementedError
 
+	def zero_mean_one_dim_kernel_matrix(self, X1, X2, cov_ix):
+		raise NotImplementedError
+
 
 class PairwiseSKIMFABasisKernel(SKIMFAKernel):
 	def kernel_matrix(self, X1, X2, kappa, eta, X1_info=None, X2_info=None):
@@ -78,6 +81,11 @@ class PairwiseSKIMFABasisKernel(SKIMFAKernel):
 		else:
 			return basis_expansion_pairwise_skimfa_kernel_corrected(kappa_expanded * X1_feat, kappa_expanded * X2_feat, eta[2], kappa, 
 																	  self.input_dim_indcs, rescale)
+
+	def zero_mean_one_dim_kernel_matrix(self, X1, X2, cov_ix):
+		X1_feat_cov_ix = self.feat_map.featmap1D(X1[:, cov_ix], cov_ix)
+		X2_feat_cov_ix = self.feat_map.featmap1D(X2[:, cov_ix], cov_ix)
+		return dot(X1_feat_cov_ix, X2_feat_cov_ix)
 
 
 class DistributedSKIMFAKernel(SKIMFAKernel):
@@ -116,7 +124,4 @@ if __name__ == "__main__":
 	eta = torch.tensor([2., 2., 2.])
 
 	print(pair_skim.kernel_matrix(X_train, X_train, kappa, eta))
-
-
-
 

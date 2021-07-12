@@ -32,6 +32,10 @@ class LinearFeatureMap(FeatureMap):
 	def featmap(self, X):
 		return (X - self.__dim_mean) / self.__dim_sd
 
+	def featmap1D(self, x1d, cov_ix):
+		trans_feat = (x1d - self.__dim_mean[cov_ix]) / self.__dim_sd[cov_ix]
+		return trans_feat.reshape((x1d.shape[0], 1))
+
 
 # ['auto-nonlinear', 'auto-linear']
 

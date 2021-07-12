@@ -1,5 +1,6 @@
 
 from math import floor
+from tqdm import tqdm
 import time
 import os
 
@@ -36,8 +37,9 @@ class SKIMFA(object):
 	def __init__(self, gpu=False):
 		assert gpu == False, 'Not Implemented GPU support yet'
 
-	def fit(self, train_valid_data, kernel_config, optimization_config):
+	def fit(self, train_valid_data, skimfa_kernel, kernel_config, optimization_config):
 		self.kernel_config = kernel_config
+		self.skimfa_kernel = skimfa_kernel
 		self.optimization_config = optimization_config
 
 		start_time = time.time()
@@ -67,7 +69,6 @@ class SKIMFA(object):
 		U_tilde = torch.ones(p, requires_grad=True) # Unconstrained parameter to generate kappa
 		noise_var = torch.tensor(noise_var_init, requires_grad=train_noise)
 		c = 0.
-		skimfa_kernel = kernel_config['skimfa_kernel']
 		skimfa_kernel_fn = skimfa_kernel(train_valid_data=train_valid_data, kernel_config=kernel_config)
 
 		training_losses = []
@@ -75,7 +76,7 @@ class SKIMFA(object):
 		saved_params = dict()
 	
 		# Gradient descent training loop
-		for t in range(T):
+		for t in tqdm(range(T)):
 			random_indcs = torch.randperm(N)
 			cv_train_indcs = random_indcs[M:]
 			cv_test_indcs = random_indcs[:M]
@@ -112,9 +113,10 @@ class SKIMFA(object):
 
 			if (t % valid_report_freq == 0) or (t == (T-1)):
 				K_valid_train = skimfa_kernel_fn.kernel_matrix(X1=X_valid, X2=X_cv_train, kappa=kappa, eta=eta)
-
 				valid_mse = cv_mse_loss(alpha, K_valid_train, Y_valid)
 				validation_losses.append(valid_mse)
+				print(f'Mean-Squared Prediction Error on Validation (Iteration={t}): {round(valid_mse.item(), 3)}')
+				print(f'Number Covariates Selected={torch.sum(kappa > 0).item()}')
 
 			if (t % param_save_freq == 0) or (t == (T-1)):
 				saved_params[t] = dict()
@@ -126,20 +128,61 @@ class SKIMFA(object):
 		end_time = time.time()
 		self.fitting_time_minutes = (end_time - start_time) / 60.
 
+		# Store final fitted parameters
+		last_iter_params = dict()
+		last_iter_params['kappa'] = make_kappa(U_tilde, c)
+		last_iter_params['eta'] = eta
+		last_iter_params['noise_var'] = noise_var
+
+		# Get kernel ridge weights using full training set
+		K_train = skimfa_kernel_fn.kernel_matrix(X1=X_train, X2=X_train, kappa=kappa, eta=eta, 
+									   X1_info=torch.arange(N), 
+									   X2_info=torch.arange(N))
+
+		alpha = kernel_ridge_weights(K_train, Y_train, noise_var)
+		last_iter_params['alpha'] = alpha
+		last_iter_params['X_train'] = X_train
+		self.last_iter_params = last_iter_params
+
+		# Store selected covariates
+		self.selected_covariates = torch.where(self.last_iter_params['kappa'] > 0)[0]
 
 	def predict(self, X_test):
-		pass
+		kappa = self.last_iter_params['kappa']
+		eta = self.last_iter_params['eta']
+		alpha = self.last_iter_params['alpha']
+		X_train = self.last_iter_params['X_train']
+		skimfa_kernel = self.skimfa_kernel
+		kernel_config = self.kernel_config.copy()
+		kernel_config['cache'] = False
+		skimfa_kernel_fn = skimfa_kernel(train_valid_data=None, kernel_config=kernel_config)
+		K_test_train = skimfa_kernel_fn.kernel_matrix(X1=X_test, X2=X_train, kappa=kappa, eta=eta)
+		return K_test_train.mv(alpha)
 
+	def get_selected_covariates(self):
+		return self.selected_covariates.clone()
 
-	def get_selected_covariates(self, X_test, iter=None):
-		pass
+	def get_prod_measure_effect(self, X, V, iter=None):
+		kappa = self.last_iter_params['kappa']
+		iter_order = len(V)
+		eta_V = self.last_iter_params['eta'][iter_order]
+		theta_V = (eta_V * torch.prod(kappa[V])) ** 2
+		if theta_V == 0:
+			return torch.zeros(X.shape[0])
+		else:
+			skimfa_kernel = self.skimfa_kernel
+			kernel_config = self.kernel_config.copy()
+			kernel_config['cache'] = False
+			skimfa_kernel_fn = skimfa_kernel(train_valid_data=None, kernel_config=kernel_config)
+			K_V = 1.
+			alpha = self.last_iter_params['alpha']
+			X_train = self.last_iter_params['X_train']
+			for cov_ix in V:
+				K_V *= skimfa_kernel_fn.zero_mean_one_dim_kernel_matrix(X, X_train, cov_ix)
+			
+			return theta_V * K_V.mv(alpha)
 
-
-	def get_prod_measure_effect(iter=None):
-		pass
-
-
-	def get_covariate_measure_effect(iter=None):
+	def get_covariate_measure_effect(self, iter=None):
 		pass
 		# assert self.Q <= 2
 		# if self.Q == 1:
@@ -195,11 +238,10 @@ if __name__ == "__main__":
 	kernel_config['feat_map'] = linfeatmap
 	kernel_config['cache'] = True
 	kernel_config['Q'] = 2
-	kernel_config['skimfa_kernel'] = PairwiseSKIMFABasisKernel
 
 	# Make optimization config
 	optimization_config = dict()
-	optimization_config['T'] = 2000
+	optimization_config['T'] = 200
 	optimization_config['M'] = 100
 	optimization_config['param_save_freq'] = 100
 	optimization_config['valid_report_freq'] = 100
@@ -209,5 +251,17 @@ if __name__ == "__main__":
 	optimization_config['truncScheduler'] = lambda t, U_tilde, c: 0
 
 	skimfit = SKIMFA()
-	skimfit.fit(train_valid_data, kernel_config, optimization_config)
+	skimfit.fit(train_valid_data, PairwiseSKIMFABasisKernel, kernel_config, optimization_config)
+
+	print(skimfit.get_selected_covariates())
+
+	print(torch.mean((Y_test - skimfit.predict(X_test)) ** 2))
+
+	print(torch.mean(skimfit.get_prod_measure_effect(X_test, [1, 2]) ** 2))
+
+	true_effect = X_test[:, 1] * theta_true[1]
+	fitted_effect = skimfit.get_prod_measure_effect(X_test, [1])
+
+	print(torch.mean((true_effect - fitted_effect) ** 2))
+	print(torch.mean(true_effect ** 2))
 
