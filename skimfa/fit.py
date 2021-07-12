@@ -27,10 +27,20 @@ def cv_mse_loss(alpha, K_test_train, y_test):
 	return torch.mean((y_test - K_test_train.mv(alpha)) ** 2)
 
 
-def get_percentile_thresh(kappa_unconstrained, percentile=.25):
-	kappa_normalized_sorted = torch.sort(make_fanova_local_scale(kappa_unconstrained, cutoff=0))[0]
+def get_percentile_thresh(U_tilde, percentile=.25):
+	kappa_normalized_sorted = torch.sort(make_kappa(U_tilde, c=0))[0]
 	pos = floor(percentile * kappa_normalized_sorted.shape[0])
 	return kappa_normalized_sorted[pos].item()
+
+
+def adaptive_cutoff_scheduler(t, U_tilde, prev_cutoff, r=.01):
+	if t < 500:
+		return 0
+	if t == 500:
+		# remove 25% of the covariates
+		c = get_percentile_thresh(U_tilde, percentile=.25)
+		return c
+	return max(min((1+r)*prev_cutoff, .75), prev_cutoff)
 
 
 class SKIMFA(object):
