@@ -89,12 +89,12 @@ class PairwiseSKIMFABasisKernel(SKIMFAKernel):
 
 
 class BlockPairwiseSKIMFABasisKernel(PairwiseSKIMFABasisKernel):
-	def __init__(self, train_valid_data, kernel_config, main_indcs, pair_indcs):
+	def __init__(self, train_valid_data, kernel_config):
 		super(BlockPairwiseSKIMFABasisKernel, self).__init__(train_valid_data, kernel_config)
-		self.main_indcs = main_indcs
-		self.pair_indcs = pair_indcs
-		self.main_feat_indcs = [x for x in self.input_dim_indcs if x in main_indcs]
-		self.pair_feat_indcs = [x for x in self.input_dim_indcs if x in pair_indcs]
+		self.main_indcs = kernel_config['main_indcs']
+		self.pair_indcs = kernel_config['pair_indcs']
+		self.main_feat_indcs = [x for x in self.input_dim_indcs if x in self.main_indcs]
+		self.pair_feat_indcs = [x for x in self.input_dim_indcs if x in self.pair_indcs]
 
 	def kernel_matrix(self, X1, X2, kappa, eta, X1_info=None, X2_info=None):
 		if (X1_info == None) or (self.kernel_config['cache'] == False):
@@ -112,13 +112,12 @@ class BlockPairwiseSKIMFABasisKernel(PairwiseSKIMFABasisKernel):
 
 		X1_feat_kappa = kappa_expanded * X1_feat
 		X2_feat_kappa = kappa_expanded * X2_feat
-		K_main_only = eta[1]**2 * dot(X1_feat_kappa[:, self.main_feat_indcs], X2_feat_kappa[:, self.main_feat_indcs].T)
+		K_main_only = eta[1]**2 * dot(X1_feat_kappa[:, self.main_feat_indcs], X2_feat_kappa[:, self.main_feat_indcs])
 
 		if self.kernel_config['uncorrected']:
-			K_main_pair = basis_expansion_pairwise_skimfa_kernel_uncorrected(X1_feat_kappa[:, self.pair_feat_indcs], X1_feat_kappa[:, self.pair_feat_indcs], eta[1], eta[2], eta[0], rescale)
-
+			K_main_pair = basis_expansion_pairwise_skimfa_kernel_uncorrected(X1_feat_kappa[:, self.pair_feat_indcs], X2_feat_kappa[:, self.pair_feat_indcs], eta[1], eta[2], eta[0], rescale)
 		else:
-			K_main_pair = basis_expansion_pairwise_skimfa_kernel_corrected(X1_feat_kappa[:, self.pair_feat_indcs], X1_feat_kappa[:, self.pair_feat_indcs], eta[2], kappa, self.input_dim_indcs, rescale)
+			K_main_pair = basis_expansion_pairwise_skimfa_kernel_corrected(X1_feat_kappa[:, self.pair_feat_indcs], X2_feat_kappa[:, self.pair_feat_indcs], eta[2], kappa, self.input_dim_indcs, rescale)
 
 		return K_main_only + K_main_pair
 
