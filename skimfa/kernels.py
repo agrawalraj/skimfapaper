@@ -18,8 +18,8 @@ def basis_expansion_pairwise_skimfa_kernel_uncorrected(X, Z, eta1, eta2, c, resc
     return (k1 + k2 + k3 + k4) * rescale
 
 
-def basis_expansion_pairwise_skimfa_kernel_corrected(X, Z, eta2, kappa, input_dim_indcs, rescale):
-	K_uncorrected = basis_expansion_pairwise_skimfa_kernel_uncorrected(X, Z, eta, rescale)
+def basis_expansion_pairwise_skimfa_kernel_corrected(X, Z, eta, kappa, input_dim_indcs, rescale):
+	K_uncorrected = basis_expansion_pairwise_skimfa_kernel_uncorrected(X, Z, eta[1], eta[2], eta[0], rescale)
 	var_block_dict = dict()
 	var_indcs = set(input_dim_indcs)
 	
@@ -35,7 +35,7 @@ def basis_expansion_pairwise_skimfa_kernel_corrected(X, Z, eta2, kappa, input_di
 	for var_ix in var_indcs:
 		dim_indcs = var_block_dict[var_ix]
 		K_correction += kappa[var_ix].pow(4) * kernel(X[:, dim_indcs], Z[:, dim_indcs], 
-												torch.tensor(0.), eta2, torch.tensor(0.), rescale=1.)
+												torch.tensor(0.), eta[2], torch.tensor(0.), rescale=1.)
 	
 	return K_uncorrected - K_correction * rescale
 
@@ -86,6 +86,42 @@ class PairwiseSKIMFABasisKernel(SKIMFAKernel):
 		X1_feat_cov_ix = self.feat_map.featmap1D(X1[:, cov_ix], cov_ix)
 		X2_feat_cov_ix = self.feat_map.featmap1D(X2[:, cov_ix], cov_ix)
 		return dot(X1_feat_cov_ix, X2_feat_cov_ix)
+
+
+class BlockPairwiseSKIMFABasisKernel(PairwiseSKIMFABasisKernel):
+	def __init__(self, train_valid_data, kernel_config, main_indcs, pair_indcs):
+		super(BlockPairwiseSKIMFABasisKernel, self).__init__(train_valid_data, kernel_config)
+		self.main_indcs = main_indcs
+		self.pair_indcs = pair_indcs
+		self.main_feat_indcs = [x for x in self.input_dim_indcs if x in main_indcs]
+		self.pair_feat_indcs = [x for x in self.input_dim_indcs if x in pair_indcs]
+
+	def kernel_matrix(self, X1, X2, kappa, eta, X1_info=None, X2_info=None):
+		if (X1_info == None) or (self.kernel_config['cache'] == False):
+			X1_feat = self.feat_map(X1)
+		else:
+			X1_feat = self.X_feat_train[X1_info, :]
+
+		if (X2_info == None) or (self.kernel_config['cache'] == False):
+			X2_feat = self.feat_map(X2)
+		else:
+			X2_feat = self.X_feat_train[X2_info, :]
+		
+		kappa_expanded = kappa[self.input_dim_indcs]
+		rescale = self.kernel_config['rescale']
+
+		X1_feat_kappa = kappa_expanded * X1_feat
+		X2_feat_kappa = kappa_expanded * X2_feat
+		K_main_only = eta[1]**2 * dot(X1_feat_kappa[:, self.main_feat_indcs], X2_feat_kappa[:, self.main_feat_indcs].T)
+
+		if self.kernel_config['uncorrected']:
+			K_main_pair = basis_expansion_pairwise_skimfa_kernel_uncorrected(X1_feat_kappa[:, self.pair_feat_indcs], X1_feat_kappa[:, self.pair_feat_indcs], eta[1], eta[2], eta[0], rescale)
+
+		else:
+			K_main_pair = basis_expansion_pairwise_skimfa_kernel_corrected(X1_feat_kappa[:, self.pair_feat_indcs], X1_feat_kappa[:, self.pair_feat_indcs], eta[2], kappa, self.input_dim_indcs, rescale)
+
+		return K_main_only + K_main_pair
+
 
 
 class DistributedSKIMFAKernel(SKIMFAKernel):
