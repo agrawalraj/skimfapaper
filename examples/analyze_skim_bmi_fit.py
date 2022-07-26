@@ -44,4 +44,27 @@ for effect_name in all_effects:
 		print(effect_name, all_effects[effect_name])
 
 # Get top 5 main effects
+effects_df = []
+for effect_name in all_effects:
+	if isinstance(effect_name, tuple):
+		effects_df.append([effect_name, all_effects[effect_name], np.abs(all_effects[effect_name]), 'interaction effect'])
+	else:
+		effects_df.append([effect_name, all_effects[effect_name], np.abs(all_effects[effect_name]), 'main effect'])
+
+effects_df = pd.DataFrame(effects_df, columns=['Effect', 'Coeff.', 'Magnitude', 'Effect Type'])
+
+effects_df = effects_df.sort_values(by='Magnitude', ascending=False)
+
+main_effects = effects_df[effects_df['Effect Type'] == 'main effect']
+
+print(main_effects[['Effect', 'Coeff.']].round(2).to_string(index=False))
+
+main_effects[['Effect', 'Coeff.']].round(2).to_latex()
+
+
+interaction_effects = effects_df[effects_df['Effect Type'] == 'interaction effect']
+
+print(interaction_effects[:10][['Effect', 'Coeff.']].round(2).to_string(index=False))
+
+
 
